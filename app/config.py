@@ -34,6 +34,15 @@ class Settings(BaseSettings):
     CIRCUIT_BREAKER_DISCONNECT_TIMEOUT_SEC: int = 60
     KILL_SWITCH_FLAG_FILE: Path = Path("kill_switch.flag")
 
+    # Strategy & Scalping Tuning (Ăn chắc mặc bền - Đánh nhanh ăn nhỏ)
+    ATR_TP_MULTIPLIER: float = 0.5  # Scalping TP siêu ngắn: ~2.0 - 2.5 giá vàng (~$2.0 / 0.01 lot)
+    ATR_SL_MULTIPLIER: float = 0.5  # Scalping SL siêu ngắn: ~2.0 - 2.5 giá vàng (không bao giờ để âm sâu)
+    MIN_WIN_PROBABILITY: float = 0.52 # Ngưỡng xác suất tối thiểu cho scalping
+    AUTO_CLOSE_PROFIT_USD: float = 2.0 # Tự động cắt chốt lời ngay khi lệnh lãi >= $2.00
+    AUTO_CLOSE_LOSS_USD: float = 2.0   # Tự động cắt lỗ khẩn cấp ngay khi lệnh âm >= -$2.00 (Bảo toàn vốn)
+    MAX_OPEN_POSITIONS: int = 1        # Giai đoạn train: Đánh 1 lệnh duy nhất dứt điểm để quan sát & học
+    MAX_DAILY_LOSS_PCT: float = 0.05   # Giới hạn lỗ tối đa ngày: 5.0% vốn (~$5.00)
+
     # Storage & Logging
     DATABASE_PATH: Path = Path("data/market_data.db")
     LOG_LEVEL: str = "INFO"

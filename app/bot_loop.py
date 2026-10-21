@@ -23,6 +23,7 @@ from app.monitoring.performance import PerformanceTracker
 from app.monitoring.telegram_bot import TelegramNotifier
 from app.risk.risk_manager import RiskManager
 from app.strategy.adaptive_manager import AdaptiveRetrainer
+from app.strategy.experience_learner import ExperienceLearner
 from app.strategy.prediction_model import PredictionModel
 from app.strategy.signal_engine import SignalEngine
 
@@ -45,9 +46,14 @@ class AutonomousTradingBot:
         self.news_extractor = NewsExtractor()
         self.feature_store = FeatureStore()
 
-        # 4. Strategy & Expected Value
+        # 4. Strategy & Expected Value (Configured for Scalping)
         self.model = PredictionModel()
-        self.signal_engine = SignalEngine(model=self.model)
+        self.signal_engine = SignalEngine(
+            model=self.model,
+            min_win_prob=settings.MIN_WIN_PROBABILITY,
+            atr_sl_mult=settings.ATR_SL_MULTIPLIER,
+            atr_tp_mult=settings.ATR_TP_MULTIPLIER,
+        )
 
         # 5. Risk & Capital Defense
         self.risk_manager = RiskManager()
@@ -57,6 +63,7 @@ class AutonomousTradingBot:
         self.notifier = TelegramNotifier()
         self.performance = PerformanceTracker()
         self.adaptive_retrainer = AdaptiveRetrainer(lookback_bars=3000, cooldown_minutes=30)
+        self.experience_learner = ExperienceLearner()
 
         self.is_running = False
 
@@ -95,9 +102,53 @@ class AutonomousTradingBot:
             app_logger.critical("Bot paused: Kill Switch is tripped. Call reset() to resume.")
             return {"status": "TRIPPED_KILL_SWITCH"}
 
-        # Step 2: Broker SSOT Reconciliation
+        # Step 2: Broker SSOT Reconciliation & Experience Learning on Closed Trades
         recon_report = self.reconciliation.reconcile()
         self.circuit_breaker.update_heartbeat()
+
+        # Learn immediately from any trades closed on broker
+        for closed_ticket in recon_report.get("closed_tickets", []):
+            deal_profit = self.adapter.get_ticket_deal_profit(closed_ticket)
+            self.circuit_breaker.record_trade_result(deal_profit)
+            self.performance.record_closed_trade(deal_profit)
+
+            # Continuous Experiential Learning
+            learn_res = self.experience_learner.on_trade_closed(
+                ticket=closed_ticket,
+                profit_usd=deal_profit,
+                active_model=self.model,
+            )
+            if learn_res.get("learned"):
+                outcome = learn_res.get("outcome")
+                if outcome == "WIN":
+                    self.notifier.send_message(
+                        f"🎓 *HỌC TẬP TỪ LỆNH THẮNG*\n"
+                        f"• Ticket: `{closed_ticket}`\n"
+                        f"• Lãi: `+${deal_profit:.2f}` USD\n"
+                        f"• Đã lưu thế nến này vào kho tri thức thành công!"
+                    )
+                else:
+                    self.notifier.send_message(
+                        f"🎓 *RÚT KINH NGHIỆM TỪ LỆNH THUA*\n"
+                        f"• Ticket: `{closed_ticket}`\n"
+                        f"• Lỗ: `-${abs(deal_profit):.2f}` USD\n"
+                        f"• Đã học để triệt tiêu tín hiệu sai ở thế nến này!"
+                    )
+
+        # Active Profit & Symmetrical Loss Taker (Ăn chắc mặc bền: Lãi >= $2 chốt, Lỗ <= -$2 cắt)
+        for ticket, pos in list(self.reconciliation.tracked_positions.items()):
+            if pos.profit >= settings.AUTO_CLOSE_PROFIT_USD:
+                app_logger.info(
+                    f"💰 ACTIVE PROFIT TAKER: Lệnh {ticket} đạt lãi +${pos.profit:.2f} >= ${settings.AUTO_CLOSE_PROFIT_USD}. Chốt lời ngay lập tức!"
+                )
+                self.adapter.close_position(ticket)
+                self.reconciliation.reconcile()
+            elif pos.profit <= -getattr(settings, "AUTO_CLOSE_LOSS_USD", 2.0):
+                app_logger.warning(
+                    f"🛑 CẮT LỖ KHẨN CẤP (BẢO TOÀN VỐN): Lệnh {ticket} chạm ngưỡng lỗ -${abs(pos.profit):.2f} <= -${settings.AUTO_CLOSE_LOSS_USD}. Cắt lỗ ngay lập tức!"
+                )
+                self.adapter.close_position(ticket)
+                self.reconciliation.reconcile()
 
         # Step 2b: Adaptive Auto Re-training Check (Self-Healing on loss streaks or drift)
         drift_status = self.performance.detect_performance_drift()
@@ -204,6 +255,14 @@ class AutonomousTradingBot:
         order_res = self.adapter.send_order(order_req)
         if order_res.success:
             self.notifier.notify_order_opened(order=order_res, sl=signal.suggested_sl, tp=signal.suggested_tp)
+            # Register snapshot into Experience Learner
+            self.experience_learner.register_trade_entry(
+                ticket=order_res.ticket,
+                vector=vec,
+                signal_type=signal.signal_type,
+                entry_price=tech.close,
+                time_utc=now_utc,
+            )
             # Reconcile immediately to track the newly opened position
             self.reconciliation.reconcile()
             return {"status": "EXECUTED", "ticket": order_res.ticket, "volume": order_res.volume}

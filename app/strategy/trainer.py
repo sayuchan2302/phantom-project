@@ -12,6 +12,7 @@ from sklearn.metrics import brier_score_loss
 
 from app.core.enums import Timeframe, TrendState
 from app.core.schemas import BarData
+from app.config import settings
 from app.execution.mt5_adapter import MT5AdapterReadOnly
 from app.intelligence.market_analyzer import MarketAnalyzer
 from app.monitoring.logger import app_logger
@@ -25,9 +26,9 @@ class ModelTrainer:
         self,
         symbol: Optional[str] = None,
         lookback_bars: int = 3000,
-        horizon_bars: int = 4, # 4 bars of M15 = 1 hour forward horizon
-        atr_tp_mult: float = 1.2,
-        atr_sl_mult: float = 1.0,
+        horizon_bars: int = 2, # 2 bars of M15 = 30 min quick scalping horizon
+        atr_tp_mult: float = settings.ATR_TP_MULTIPLIER,
+        atr_sl_mult: float = settings.ATR_SL_MULTIPLIER,
     ):
         self.symbol = symbol
         self.lookback_bars = lookback_bars

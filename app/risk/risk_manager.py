@@ -17,6 +17,7 @@ from app.core.schemas import (
     TechnicalFeatures,
     TradeSignal,
 )
+from app.config import settings
 from app.monitoring.logger import app_logger
 
 
@@ -26,14 +27,18 @@ class RiskManager:
     def __init__(
         self,
         risk_per_trade_pct: float = 0.005,  # 0.5% capital risk per trade
-        max_daily_loss_pct: float = 0.02,   # 2.0% max daily loss
+        max_daily_loss_pct: Optional[float] = None,
         max_absolute_spread_pts: int = 400, # 40 pips on Gold
-        max_open_positions: int = 2,
+        max_open_positions: Optional[int] = None,
     ):
         self.risk_per_trade_pct = risk_per_trade_pct
-        self.max_daily_loss_pct = max_daily_loss_pct
+        self.max_daily_loss_pct = (
+            max_daily_loss_pct if max_daily_loss_pct is not None else getattr(settings, "MAX_DAILY_LOSS_PCT", 0.05)
+        )
         self.max_absolute_spread_pts = max_absolute_spread_pts
-        self.max_open_positions = max_open_positions
+        self.max_open_positions = (
+            max_open_positions if max_open_positions is not None else getattr(settings, "MAX_OPEN_POSITIONS", 1)
+        )
 
     def calculate_lot_size(
         self,

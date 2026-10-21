@@ -400,6 +400,20 @@ class MT5Adapter:
             comment=res.comment if res else "Unknown error",
         )
 
+    def get_ticket_deal_profit(self, ticket: int) -> float:
+        """Query closed deal profit from MT5 deal history for a specific ticket."""
+        now = datetime.now(timezone.utc)
+        start = now - timedelta(days=2)
+        deals = mt5.history_deals_get(start, now, position=ticket)
+        if deals:
+            # Filter deals belonging to this position with non-zero profit
+            position_deals = [d for d in deals if d.position_id == ticket and d.profit != 0]
+            if position_deals:
+                return float(sum(d.profit for d in position_deals))
+            return float(sum(d.profit for d in deals))
+        return 0.0
+
 
 # Backward compatibility alias
 MT5AdapterReadOnly = MT5Adapter
+
